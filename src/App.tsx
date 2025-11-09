@@ -1,7 +1,45 @@
+import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAwdLplXXhm4bM_3ik_yGJuzXvs7NWmEJQ",
+  authDomain: "travel-spendings-a36a3.firebaseapp.com",
+  projectId: "travel-spendings-a36a3",
+  storageBucket: "travel-spendings-a36a3.firebasestorage.app",
+  messagingSenderId: "165855133517",
+  appId: "1:165855133517:web:8a467844419b8c2ebc0104",
+  measurementId: "G-LTFHJR844Y"
+};
+
+const app = initializeApp(firebaseConfig);
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+🔥 Step 2: Replace App.tsx with Firebase Version
+Replace your entire src/App.tsx with this:
 import { useState, useEffect } from 'react';
-import { DollarSign, TrendingUp, PieChart, Download, Upload, Plus, Settings, List, BarChart3, Trash2, Edit2, X } from 'lucide-react';
+import { DollarSign, TrendingUp, PieChart, Download, Upload, Plus, Settings, List, BarChart3, Trash2, Edit2, X, LogOut, LogIn } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, PieChart as RechartsPie, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import Papa from 'papaparse';
+import { auth, db } from './firebase';
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  User 
+} from 'firebase/auth';
+import { 
+  collection, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  query, 
+  onSnapshot,
+  serverTimestamp,
+  Timestamp 
+} from 'firebase/firestore';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 const DEFAULT_CATEGORIES = ['Food', 'Transport', 'Accommodation', 'Entertainment', 'Shopping', 'Other'];
@@ -17,6 +55,7 @@ interface Transaction {
   category: string;
   paymentMethod: string;
   createdAt: string;
+  userId?: string;
 }
 
 interface FormData {
@@ -33,12 +72,18 @@ interface ExchangeRates {
 }
 
 const App = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLogin, setIsLogin] = useState(true);
+  const [authError, setAuthError] = useState('');
+  
   const [view, setView] = useState('dashboard');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories] = useState(DEFAULT_CATEGORIES);
   const [paymentMethods] = useState(DEFAULT_PAYMENT_METHODS);
   const [mainCurrency, setMainCurrency] = useState('EUR');
-  const [exchangeRates] = useState<ExchangeRates>({ EUR: 1, USD: 1.1, GBP: 0.86, JPY: 150 });
+  const [exchangeRates] = useState<ExchangeRates>({ EUR: 1, USD: 1.1, GBP: 0.86, JPY: 150, VND: 27000 });
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -51,8 +96,52 @@ const App = () => {
     paymentMethod: ''
   });
 
+  // Auth listener
   useEffect(() => {
-    loadData();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Firestore real-time listener
+  useEffect(() => {
+    if (!user) {
+      setTransactions([]);
+      return;
+    }
+
+    const q = query(collection(db, 'transactions'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const txs: Transaction[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        // Only show transactions from this user
+        if (data.userId === user.uid) {
+          txs.push({
+            id: doc.id,
+            date: data.date,
+            name: data.name,
+            price: data.price,
+            currency: data.currency,
+            priceInMain: data.priceInMain,
+            category: data.category || '',
+            paymentMethod: data.paymentMethod || '',
+            createdAt: data.createdAt instanceof Timestamp 
+              ? data.createdAt.toDate().toISOString() 
+              : data.createdAt || new Date().toISOString(),
+            userId: data.userId
+          });
+        }
+      });
+      setTransactions(txs);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Online/offline listener
+  useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
@@ -63,28 +152,33 @@ const App = () => {
     };
   }, []);
 
-  useEffect(() => {
-    saveData();
-  }, [transactions]);
-
-  const loadData = () => {
+  const handleSignup = async () => {
     try {
-      const stored = localStorage.getItem('travel-spending-data');
-      if (stored) {
-        const data = JSON.parse(stored);
-        setTransactions(data.transactions || []);
-      }
-    } catch (error) {
-      console.log('Starting fresh');
+      setAuthError('');
+      await createUserWithEmailAndPassword(auth, email, password);
+      setEmail('');
+      setPassword('');
+    } catch (error: any) {
+      setAuthError(error.message);
     }
   };
 
-  const saveData = () => {
+  const handleLogin = async () => {
     try {
-      const data = { transactions, lastSync: new Date().toISOString() };
-      localStorage.setItem('travel-spending-data', JSON.stringify(data));
-    } catch (error) {
-      console.error('Error saving:', error);
+      setAuthError('');
+      await signInWithEmailAndPassword(auth, email, password);
+      setEmail('');
+      setPassword('');
+    } catch (error: any) {
+      setAuthError(error.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error: any) {
+      console.error('Logout error:', error);
     }
   };
 
@@ -94,14 +188,15 @@ const App = () => {
     return (amount / rate) * mainRate;
   };
 
-  const handleAddTransaction = () => {
-    if (!formData.name || !formData.price) {
+  const handleAddTransaction = async () => {
+    if (!formData.name || !formData.price || !user) {
       alert('Please fill in name and price');
       return;
     }
+
     const priceInMain = convertToMainCurrency(parseFloat(formData.price), formData.currency);
-    const newTransaction: Transaction = {
-      id: editingTransaction?.id || Date.now().toString(),
+    
+    const transactionData = {
       date: formData.date,
       name: formData.name,
       price: parseFloat(formData.price),
@@ -109,14 +204,24 @@ const App = () => {
       category: formData.category,
       paymentMethod: formData.paymentMethod,
       priceInMain,
-      createdAt: editingTransaction?.createdAt || new Date().toISOString()
+      userId: user.uid,
+      createdAt: serverTimestamp()
     };
-    if (editingTransaction) {
-      setTransactions(transactions.map(t => t.id === editingTransaction.id ? newTransaction : t));
-    } else {
-      setTransactions([...transactions, newTransaction]);
+
+    try {
+      if (editingTransaction) {
+        // Update existing transaction
+        const docRef = doc(db, 'transactions', editingTransaction.id);
+        await updateDoc(docRef, transactionData);
+      } else {
+        // Add new transaction
+        await addDoc(collection(db, 'transactions'), transactionData);
+      }
+      resetForm();
+    } catch (error) {
+      console.error('Error saving transaction:', error);
+      alert('Error saving transaction. Please try again.');
     }
-    resetForm();
   };
 
   const resetForm = () => {
@@ -145,9 +250,14 @@ const App = () => {
     setShowAddForm(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Delete this transaction?')) {
-      setTransactions(transactions.filter(t => t.id !== id));
+      try {
+        await deleteDoc(doc(db, 'transactions', id));
+      } catch (error) {
+        console.error('Error deleting transaction:', error);
+        alert('Error deleting transaction. Please try again.');
+      }
     }
   };
 
@@ -172,25 +282,32 @@ const App = () => {
 
   const importFromCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file || !user) return;
+    
     Papa.parse(file, {
       header: true,
-      complete: (results: Papa.ParseResult<any>) => {
-        const imported: Transaction[] = results.data
-          .filter((row: any) => row.Date && row.Name && row.Price)
-          .map((row: any) => ({
-            id: Date.now().toString() + Math.random(),
-            date: row.Date,
-            name: row.Name,
-            price: parseFloat(row.Price),
-            currency: row.Currency || mainCurrency,
-            priceInMain: parseFloat(row['Price in Main']) || parseFloat(row.Price),
-            category: row.Category || '',
-            paymentMethod: row['Payment Method'] || '',
-            createdAt: new Date().toISOString()
-          }));
-        setTransactions([...transactions, ...imported]);
-        alert(`Imported ${imported.length} transactions`);
+      complete: async (results: Papa.ParseResult<any>) => {
+        try {
+          for (const row of results.data) {
+            if (row.Date && row.Name && row.Price) {
+              await addDoc(collection(db, 'transactions'), {
+                date: row.Date,
+                name: row.Name,
+                price: parseFloat(row.Price),
+                currency: row.Currency || mainCurrency,
+                priceInMain: parseFloat(row['Price in Main']) || parseFloat(row.Price),
+                category: row.Category || '',
+                paymentMethod: row['Payment Method'] || '',
+                userId: user.uid,
+                createdAt: serverTimestamp()
+              });
+            }
+          }
+          alert(`Imported transactions successfully!`);
+        } catch (error) {
+          console.error('Error importing:', error);
+          alert('Error importing some transactions.');
+        }
       }
     });
   };
@@ -223,6 +340,78 @@ const App = () => {
     return acc;
   }, []);
 
+  // Login screen
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+          <div className="flex items-center justify-center mb-6">
+            <DollarSign size={48} className="text-blue-600" />
+          </div>
+          <h1 className="text-3xl font-bold text-center mb-2">Travel Spending</h1>
+          <p className="text-gray-600 text-center mb-8">Track your expenses anywhere</p>
+          
+          <div className="space-y-4">
+            <input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            
+            {authError && (
+              <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">
+                {authError}
+              </div>
+            )}
+            
+            {isLogin ? (
+              <>
+                <button
+                  onClick={handleLogin}
+                  className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition flex items-center justify-center gap-2"
+                >
+                  <LogIn size={20} />
+                  Login
+                </button>
+                <p className="text-center text-sm text-gray-600">
+                  Don't have an account?{' '}
+                  <button onClick={() => setIsLogin(false)} className="text-blue-600 font-semibold">
+                    Sign up
+                  </button>
+                </p>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={handleSignup}
+                  className="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 transition"
+                >
+                  Sign Up
+                </button>
+                <p className="text-center text-sm text-gray-600">
+                  Already have an account?{' '}
+                  <button onClick={() => setIsLogin(true)} className="text-blue-600 font-semibold">
+                    Login
+                  </button>
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Main app (same as before, with logout button)
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-blue-600 text-white p-4 shadow-lg">
@@ -231,9 +420,18 @@ const App = () => {
             <DollarSign size={28} />
             <h1 className="text-xl font-bold">Travel Spending</h1>
           </div>
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-red-400'}`} />
-            <span className="text-sm">{isOnline ? 'Online' : 'Offline'}</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-red-400'}`} />
+              <span className="text-sm">{isOnline ? 'Online' : 'Offline'}</span>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1 bg-blue-700 hover:bg-blue-800 px-3 py-1 rounded text-sm"
+            >
+              <LogOut size={16} />
+              Logout
+            </button>
           </div>
         </div>
       </div>
@@ -460,10 +658,20 @@ const App = () => {
         {view === 'settings' && (
           <div className="space-y-4">
             <h2 className="text-xl font-bold">Settings</h2>
+            
+            <div className="bg-white rounded-lg shadow p-6">
+              <h3 className="font-bold mb-2">Account</h3>
+              <p className="text-sm text-gray-600 mb-4">{user.email}</p>
+              <button onClick={handleLogout} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex items-center gap-2">
+                <LogOut size={16} />
+                Logout
+              </button>
+            </div>
+            
             <div className="bg-white rounded-lg shadow p-6">
               <h3 className="font-bold mb-4">Data Management</h3>
               <div className="space-y-2">
-                <button onClick={exportToCSV} className="w-full bg-green-600 text-white px-4 py-3 rounded-lg flex items-center justify-center gap-2 hover:bg-green-700">
+                <button onClick={exportToCSV} className="w-full bg-green-600 text-white px-4 py-3 rounded-lg flex items-center justify-center gap-2 hover:bg-green-700>
                   <Download size={20} />
                   Export to CSV
                 </button>
@@ -482,6 +690,13 @@ const App = () => {
                 ))}
               </select>
             </div>
+            
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <h3 className="font-bold text-green-900 mb-2">🔥 Firebase Sync Enabled</h3>
+              <p className="text-sm text-green-800">
+                Your data is synced to the cloud and accessible from any device. Changes appear instantly across all your devices!
+              </p>
+            </div>
           </div>
         )}
       </div>
@@ -489,4 +704,4 @@ const App = () => {
   );
 };
 
-export default App;
+export default App; 

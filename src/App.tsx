@@ -1,22 +1,4 @@
-import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyAwdLplXXhm4bM_3ik_yGJuzXvs7NWmEJQ",
-  authDomain: "travel-spendings-a36a3.firebaseapp.com",
-  projectId: "travel-spendings-a36a3",
-  storageBucket: "travel-spendings-a36a3.firebasestorage.app",
-  messagingSenderId: "165855133517",
-  appId: "1:165855133517:web:8a467844419b8c2ebc0104",
-  measurementId: "G-LTFHJR844Y"
-};
-
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-🔥 Step 2: Replace App.tsx with Firebase Version
-Replace your entire src/App.tsx with this:
 import { useState, useEffect } from 'react';
 import { DollarSign, TrendingUp, PieChart, Download, Upload, Plus, Settings, List, BarChart3, Trash2, Edit2, X, LogOut, LogIn } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, PieChart as RechartsPie, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
